@@ -21,6 +21,7 @@ android.release_artifact = apk
 android.allow_backup = True
 p4a.bootstrap = sdl2
 p4a.branch = v2024.01.21
+p4a.local_recipes = ./recipes
 
 [buildozer]
 log_level = 2
