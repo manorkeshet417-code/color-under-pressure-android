@@ -46,6 +46,9 @@ class _State:
     kb_auto = False         # opened by us because a text box appeared
     field_t = 0.0           # last time the game drew a text box
     field_rect = None
+    frame_fields = []       # text boxes drawn in this frame: (rect, active)
+    last_fields = []        # ... in the last finished frame
+    want_field = None       # {'rect', 't', 'tries'}: the box the player tapped, until it becomes active
     field_gone_since = 1.0
 
 
@@ -190,15 +193,44 @@ def install():
         webbrowser.open = webbrowser.open_new = webbrowser.open_new_tab = open_url
 
 
-def text_field(rect):
+def text_field(rect, active=True):
     """Called by the game every time it draws a text box (ui_input)."""
     if not ANDROID:
         return
     try:
-        S.field_rect = (rect[0], rect[1], rect[2], rect[3])
+        r = (rect[0], rect[1], rect[2], rect[3])
     except Exception:
-        S.field_rect = None
+        return
+    S.frame_fields.append((r, bool(active)))
+    if active or not S.field_rect:
+        S.field_rect = r                       # the keyboard button goes next to the active box
     S.field_t = time.time()
+
+
+def _field_at(pos):
+    for r, active in S.last_fields:
+        x, y, w, h = r
+        if x <= pos[0] <= x + w and y <= pos[1] <= y + h:
+            return r, active
+    return None, None
+
+
+def _switch_tick():
+    """A tapped box that the game didn't make active by itself gets Tab presses (phones have no Tab key)."""
+    import pygame
+    wf = S.want_field
+    if not wf:
+        return
+    now = time.time()
+    if now - wf['t'] < 0.12:                   # give the game a couple of frames to react to the tap
+        return
+    active = dict(S.last_fields).get(wf['rect'])
+    if active is None or active or wf['tries'] >= 4:
+        S.want_field = None
+        return
+    S.pending.extend(_key_events(pygame.K_TAB, True, '	', 43) + _key_events(pygame.K_TAB, False, '', 43))
+    wf['tries'] += 1
+    wf['t'] = now
 
 
 def _field_shown():
@@ -242,7 +274,9 @@ def _kb_home():
         return None
     W, H = _size()
     x, y, w, h = S.field_rect
-    return min(W - 60, x + w + 40), y + h // 2
+    if x + w + 40 <= W - 30:
+        return x + w + 40, y + h // 2           # right of the box
+    return max(30, x - 40), y + h // 2          # no room on the right (box at the screen edge): left of it
 
 
 def _move_mode():
@@ -347,10 +381,13 @@ def _handle(e, typed):
         kb = _kb_home()
         if kb and _hit(pos, kb, 34):
             S.on_control.add(pid); _set_keyboard(not S.kb_open); return swallow
-        if _field_shown() and S.field_rect:
-            x, y, w, h = S.field_rect
-            if x <= pos[0] <= x + w and y <= pos[1] <= y + h and not S.kb_open:
-                _set_keyboard(True)              # tapping a text box opens the keyboard (the game still gets the tap)
+        if _field_shown():
+            r, active = _field_at(pos)
+            if r:                                # tapping a text box opens the keyboard and makes it the active one
+                if not S.kb_open:
+                    _set_keyboard(True)
+                if not active:
+                    S.want_field = {'rect': r, 't': time.time(), 'tries': 0}
         if _move_mode():
             if S.stick is None and pos[0] < W * 0.42 and pos[1] > H * 0.4:
                 sx, sy = _stick_home()
@@ -411,6 +448,8 @@ def _draw_overlay():
         return
     try:
         layer = pygame.Surface(s.get_size(), pygame.SRCALPHA)
+        S.last_fields, S.frame_fields = S.frame_fields, []
+        _switch_tick()
         _kb_auto_tick()
         kb = _kb_home()
         if kb:                                   # keyboard button, next to the text box
