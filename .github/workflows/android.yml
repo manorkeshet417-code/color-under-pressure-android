@@ -37,11 +37,14 @@ jobs:
       # the SDK, NDK and compiled recipes take long the first time: keep them between builds
       - uses: actions/cache@v4
         with:
-          path: |
-            ~/.buildozer
-            .buildozer
-          key: buildozer-${{ hashFiles('buildozer.spec') }}-v1
-          restore-keys: buildozer-
+          path: ~/.buildozer
+          key: buildozer-sdk-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-sdk-
+      # the compiled recipes (python, pygame...) are rebuilt whenever the spec or a recipe changes
+      - uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: buildozer-dist-${{ hashFiles('buildozer.spec', 'recipes/**') }}
 
       - name: Prepare the game for the phone
         run: |
