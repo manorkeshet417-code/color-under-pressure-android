@@ -14,6 +14,9 @@ src = open(path, encoding='utf-8').read()
 CHANGES = [
     ('WIDTH, HEIGHT = 900, 700',
      "WIDTH, HEIGHT = __import__('android_shim').game_size(900, 700)"),
+    # every text box tells the phone layer it's on screen: the keyboard opens by itself
+    ('def ui_input(surf, rect, text, placeholder, active, col, secret=False):\n',
+     "def ui_input(surf, rect, text, placeholder, active, col, secret=False):\n    __import__('android_shim').text_field(rect)\n"),
     ('def _data_dir():\n',
      'def _data_dir():\n    if os.environ.get("ANDROID_PRIVATE"): return os.environ["ANDROID_PRIVATE"]   # Android: survives updates\n'),
 ]

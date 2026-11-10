@@ -43,6 +43,10 @@ class _State:
     on_control = set()     # pointers that started on a control
     fingers = []           # fingers down, in order; the first one drives SDL's emulated mouse
     kb_open = False
+    kb_auto = False         # opened by us because a text box appeared
+    field_t = 0.0           # last time the game drew a text box
+    field_rect = None
+    field_gone_since = 1.0
 
 
 S = _State()
@@ -186,6 +190,35 @@ def install():
         webbrowser.open = webbrowser.open_new = webbrowser.open_new_tab = open_url
 
 
+def text_field(rect):
+    """Called by the game every time it draws a text box (ui_input)."""
+    if not ANDROID:
+        return
+    try:
+        S.field_rect = (rect[0], rect[1], rect[2], rect[3])
+    except Exception:
+        S.field_rect = None
+    S.field_t = time.time()
+
+
+def _field_shown():
+    return time.time() - S.field_t < 0.4
+
+
+def _kb_auto_tick():
+    """Open the phone keyboard when a text box shows up, close it when it is gone."""
+    now = time.time()
+    if _field_shown():
+        if S.field_gone_since and not S.kb_open:
+            _set_keyboard(True, auto=True)        # a text box just appeared
+        S.field_gone_since = 0.0
+    else:
+        if not S.field_gone_since:
+            S.field_gone_since = now
+        elif S.kb_open and now - S.field_gone_since > 0.6:
+            _set_keyboard(False)
+
+
 # ---------------------------------------------------------------- controls
 def _size():
     import pygame
@@ -204,8 +237,12 @@ def _action_home():
 
 
 def _kb_home():
+    """The keyboard button sits right of the text box (None when there is no text box)."""
+    if not _field_shown() or not S.field_rect:
+        return None
     W, H = _size()
-    return W - 34, H // 2
+    x, y, w, h = S.field_rect
+    return min(W - 60, x + w + 40), y + h // 2
 
 
 def _move_mode():
@@ -307,8 +344,13 @@ def _handle(e, typed):
     if ph == 'down':
         if REAL and pid not in S.fingers:
             S.fingers.append(pid)
-        if _hit(pos, _kb_home(), 32):
-            S.on_control.add(pid); _toggle_keyboard(); return swallow
+        kb = _kb_home()
+        if kb and _hit(pos, kb, 34):
+            S.on_control.add(pid); _set_keyboard(not S.kb_open); return swallow
+        if _field_shown() and S.field_rect:
+            x, y, w, h = S.field_rect
+            if x <= pos[0] <= x + w and y <= pos[1] <= y + h and not S.kb_open:
+                _set_keyboard(True)              # tapping a text box opens the keyboard (the game still gets the tap)
         if _move_mode():
             if S.stick is None and pos[0] < W * 0.42 and pos[1] > H * 0.4:
                 sx, sy = _stick_home()
@@ -344,11 +386,12 @@ def _handle(e, typed):
     return swallow if was else None
 
 
-def _toggle_keyboard():
+def _set_keyboard(on, auto=False):
     import pygame
-    S.kb_open = not S.kb_open
+    S.kb_open = on
+    S.kb_auto = auto and on
     try:
-        if S.kb_open:
+        if on:
             W, H = _size()
             pygame.key.set_text_input_rect(pygame.Rect(0, H - 80, W, 60))
             pygame.key.start_text_input()
@@ -368,12 +411,14 @@ def _draw_overlay():
         return
     try:
         layer = pygame.Surface(s.get_size(), pygame.SRCALPHA)
-        # keyboard button: always there, faint
-        kx, ky = _kb_home()
-        pygame.draw.circle(layer, (255, 255, 255, 150 if S.kb_open else 70), (kx, ky), 24)
-        for i in range(3):
-            for j in range(3):
-                pygame.draw.rect(layer, (20, 20, 35, 200), (kx - 13 + j * 9, ky - 10 + i * 7, 7, 5), border_radius=1)
+        _kb_auto_tick()
+        kb = _kb_home()
+        if kb:                                   # keyboard button, next to the text box
+            kx, ky = kb
+            pygame.draw.circle(layer, (255, 255, 255, 210 if S.kb_open else 150), (kx, ky), 26)
+            for i in range(3):
+                for j in range(3):
+                    pygame.draw.rect(layer, (20, 20, 35, 230), (kx - 13 + j * 9, ky - 10 + i * 7, 7, 5), border_radius=1)
         if _move_mode():
             sx, sy = _stick_home()
             pygame.draw.circle(layer, (255, 255, 255, 45), (sx, sy), STICK_R)
