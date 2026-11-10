@@ -43,6 +43,8 @@ class _State:
     on_control = set()     # pointers that started on a control
     fingers = []           # fingers down, in order; the first one drives SDL's emulated mouse
     kb_open = False
+    net_err = ''
+    net_err_t = 0.0
     kb_auto = False         # opened by us because a text box appeared
     field_t = 0.0           # last time the game drew a text box
     field_rect = None
@@ -61,12 +63,31 @@ def install():
     os.environ.setdefault('SDL_ANDROID_TRAP_BACK_BUTTON', '1')
     import pygame
 
-    # HTTPS: Python on Android has no system certificate store, so use certifi's
+    # HTTPS: Python on Android has no system certificate store, so every HTTPS request uses certifi's
     try:
-        import certifi
-        os.environ.setdefault('SSL_CERT_FILE', certifi.where())
-    except Exception:
-        pass
+        import certifi, ssl
+        ca = certifi.where()
+        os.environ['SSL_CERT_FILE'] = ca
+        ssl._create_default_https_context = lambda *a, **k: ssl.create_default_context(cafile=ca)
+    except Exception as ex:
+        S.net_err = 'certifi: %r' % (ex,)
+        S.net_err_t = time.time()
+
+    # network errors: the game turns every failure into "No connection"; keep the real reason and show it
+    import urllib.request
+    _urlopen = urllib.request.urlopen
+
+    def urlopen(*a, **k):
+        try:
+            return _urlopen(*a, **k)
+        except Exception as ex:
+            import urllib.error
+            if not isinstance(ex, urllib.error.HTTPError):    # HTTP errors are normal answers (wrong password...)
+                S.net_err = '%s: %s' % (type(ex).__name__, str(ex)[:160])
+                S.net_err_t = time.time()
+                print('network error:', S.net_err)
+            raise
+    urllib.request.urlopen = urlopen
 
     # ---- the screen ----
     _set_mode = pygame.display.set_mode
@@ -473,6 +494,12 @@ def _draw_overlay():
             f = _font.get('a') or _font.setdefault('a', pygame.font.SysFont(None, 46, bold=True))
             txt = f.render('E', True, (255, 255, 255))
             layer.blit(txt, txt.get_rect(center=(ax, ay)))
+        if S.net_err and time.time() - S.net_err_t < 12:      # why the network failed (for fixing it)
+            f = _font.get('n') or _font.setdefault('n', pygame.font.SysFont(None, 22))
+            t = f.render('net: ' + S.net_err, True, (255, 140, 120))
+            W, H = _size()
+            bg = pygame.Surface((min(W, t.get_width() + 16), t.get_height() + 8), pygame.SRCALPHA); bg.fill((0, 0, 0, 170))
+            layer.blit(bg, (0, H - bg.get_height())); layer.blit(t, (8, H - bg.get_height() + 4))
         s.blit(layer, (0, 0))
     except Exception as ex:
         print('overlay', ex)
