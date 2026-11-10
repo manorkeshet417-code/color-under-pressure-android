@@ -8,4 +8,8 @@ os.chdir(here)
 import android_shim
 android_shim.install()
 
-runpy.run_path(os.path.join(here, 'color_rush.py'), run_name='__main__')
+# the Android build ships compiled files: color_rush.pyc instead of color_rush.py
+game = os.path.join(here, 'color_rush.py')
+if not os.path.exists(game):
+    game += 'c'
+runpy.run_path(game, run_name='__main__')
